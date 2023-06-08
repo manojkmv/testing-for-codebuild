@@ -33,4 +33,3 @@ phases:
       - ls -l
       - printf '{"ImageURI":"%s:%s"}' ${ECR_REPOSITORY_URI} ${IMAGE_TAG} > imageDetail.json
       - cat imageDetail.json
-      - aws ecs describe-task-definition --task-definition test-for-codebuild --query taskDefinition > task-definition.json
