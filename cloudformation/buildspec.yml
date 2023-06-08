@@ -4,6 +4,7 @@ phases:
   install:
     runtime-versions:
       nodejs: 18
+      java: openjdk8
   pre_build:
     commands:
       - echo logging into Amazon ECR
@@ -13,6 +14,8 @@ phases:
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
       - node -v
+      - java -version
+      - mvn -version
       - printenv
       - echo $BASE_IMG_NAME
   build:
