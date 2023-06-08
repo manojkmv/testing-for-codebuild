@@ -4,7 +4,7 @@ phases:
   install:
     runtime-versions:
       nodejs: 18
-      java: openjdk17
+      java: corretto17
   pre_build:
     commands:
       - echo logging into Amazon ECR
