@@ -1,0 +1,36 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+  pre-build:
+    commands:
+      - echo logging into Amazon ECR
+      - aws --version
+      - echo $AWS_ACCOUNT_ID
+      - docker login -u AWS -p $(aws ecr get-login-password --region ${AWS_REGION}) $AWS_ACCOUNT_ID.dkr.ecr.${AWS_REGION}.amazonaws.com
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
+      - node -v
+      - printenv
+      - echo $BASE_IMG_NAME
+  build:
+    commands:
+      - echo Build started on `date`
+      - npm i
+      - npm test
+      - echo Building the Docker image...
+      - docker build --build-arg BASE_IMG_NAME=${BASE_IMG_NAME} -t ${ECR_REPOSITORY_URI}:latest .
+      - docker tag ${ECR_REPOSITORY_URI}:latest ${ECR_REPOSITORY_URI}:${IMAGE_TAG}
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images...
+      - docker push ${ECR_REPOSITORY_URI}:latest
+      - docker push ${ECR_REPOSITORY_URI}:${IMAGE_TAG}
+      - echo Writing image definitions file...
+      - ls -l
+      - printf '{"ImageURI":"%s:%s"}' ${ECR_REPOSITORY_URI} ${IMAGE_TAG} > imageDetail.json
+      - cat imageDetail.json
+      - aws ecs describe-task-definition --task-definition test-for-codebuild --query taskDefinition > task-definition.json

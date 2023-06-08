@@ -1,0 +1,211 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: The CloudFormation template for the CodePipeline.
+
+Parameters:
+  Application:
+    Type: String
+    Default: sp-api-keypool-proxy-service
+  GithubUserName:
+    Type: String
+  GithubRepo:
+    Type: String
+  GithubBranch:
+    Type: String
+  GithubOAuthToken:
+    Type: String
+  Stage:
+    Type: String
+
+Resources:
+
+  CodePipeLineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:Get*"
+                  - "s3:GetBucketLocation"
+                  - "s3:PutObject"
+                  - "s3:List*"
+                  - "s3:GetObjectVersion"
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:BatchGetBuilds'
+                  - 'logs:CreateLogStream'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:DescribeLogStreams'
+                  - 'logs:PutLogEvents'
+                  - 'ecs:RegisterTaskDefinition'
+                  - 'codedeploy:GetApplicationRevision'
+                  - 'codedeploy:CreateDeployment'
+                  - 'codedeploy:GetDeploymentConfig'
+                  - 'codedeploy:RegisterApplicationRevision'
+                  - 'codedeploy:GetDeployment'
+                  - 'codedeploy:GetApplication'
+                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSCodePipeline_FullAccess'
+
+  CodeBuildExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                  - "s3:List*"
+                  - "s3:GetObjectVersion"
+                  - 'logs:CreateLogStream'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:DescribeLogStreams'
+                  - 'logs:PutLogEvents'
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:GetRepositoryPolicy'
+                  - 'ecr:DescribeRepositories'
+                  - 'ecr:ListImages'
+                  - 'ecr:DescribeImages'
+                  - 'ecr:BatchGetImage'
+                  - 'ecr:ListTagsForResource'
+                  - 'ecr:DescribeImageScanFindings'
+                  - 'ecr:CompleteLayerUpload'
+                  - 'ecr:UploadLayerPart'
+                  - 'ecr:InitiateLayerUpload'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:PutImage'
+                  - 'ecs:DescribeTaskDefinition'
+                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess'
+        - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser'
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: True
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ECR_REPOSITORY_URI
+            Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/test-for-codebuild'
+          - Name: BASE_IMG_NAME
+            Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/node:18.16.0-alpine3.16'
+          - Name: AWS_ACCOUNT_ID
+            Value: !Sub '${AWS::AccountId}'
+      Name: !Sub ${Application}-build-project
+      ServiceRole: !Ref CodeBuildExecutionRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: cloudformation/buildspec.yml
+
+  CodePipeLine:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: 'sp-api-subscription-test-bucket'
+        Type: S3
+      Name: !Sub ${Application}-code-pipeline
+      RestartExecutionOnUpdate: False
+      RoleArn:
+        Fn::GetAtt: [ CodePipeLineExecutionRole, Arn ]
+
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Repo: !Ref GithubRepo
+                Branch: !Ref GithubBranch
+                Owner: !Ref GithubUserName
+                OAuthToken: !Ref GithubOAuthToken
+              RunOrder: 1
+              OutputArtifacts:
+                - Name: source-output-artifacts
+            - Name: S3Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: 1
+              Region: !Ref AWS::Region
+              Configuration:
+                S3Bucket: !Sub ${Stage}-monsoon-ecs-taskdefinitions
+                S3ObjectKey: test_for_codebuild.zip
+                PollForSourceChanges: 'false'
+              RunOrder: 2
+              OutputArtifacts:
+                - Name: s3-taskdef-artifacts
+
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: build-output-artifacts
+              InputArtifacts:
+                - Name: source-output-artifacts
+              Configuration:
+                ProjectName: !Ref BuildProject
+              RunOrder: 1
+
+#        - Name: Deploy
+#          Actions:
+#            - Name: Deploy
+#              ActionTypeId:
+#                Category: Deploy
+#                Owner: AWS
+#                Provider: CodeDeployToECS
+#                Version: '1'
+#              RunOrder: 1
+#              Configuration:
+#                AppSpecTemplateArtifact: source-output-artifacts
+#                ApplicationName: !Sub ${Application}-application
+#                DeploymentGroupName: !Sub ${Application}-deployment-group
+#                Image1ArtifactName: build-output-artifacts
+#                Image1ContainerName: IMAGE1_NAME
+#                TaskDefinitionTemplatePath: data_accessor_taskdef.json
+#                AppSpecTemplatePath: cloudformation/appspec.yml
+#                TaskDefinitionTemplateArtifact: s3-taskdef-artifacts
+#              OutputArtifacts: []
+#              InputArtifacts:
+#                - Name: source-output-artifacts
+#                - Name: build-output-artifacts
+#                - Name: s3-taskdef-artifacts
+#              Region: us-east-1
+#              Namespace: DeployVariables

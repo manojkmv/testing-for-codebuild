@@ -1,0 +1,21 @@
+{
+  "name": "testing-for-codebuild",
+  "version": "1.0.0",
+  "description": "test repo for doing research on code build with latest version",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "mocha --timeout 15000 --recursive test/test_*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.2.5",
+    "chai": "^4.3.7",
+    "mocha": "^10.2.0",
+    "sinon": "^15.0.2"
+  },
+  "nyc": {
+    "include": "src"
+  },
+  "author": "",
+  "license": "ISC"
+}
